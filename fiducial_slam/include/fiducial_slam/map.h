@@ -212,6 +212,7 @@ class Map {
     int originFid;
 
     bool havePose;
+    bool enablePublishTf;
     float tfPublishInterval;
     ros::Time tfPublishTime;
     geometry_msgs::TransformStamped poseTf;
