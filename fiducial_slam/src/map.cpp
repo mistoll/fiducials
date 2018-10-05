@@ -46,6 +46,13 @@
 
 #include <boost/filesystem.hpp>
 
+enum {
+    UPDATE_VARIANCE_DAVID,
+    UPDATE_VARIANCE_SUM_IN_QUADRATURE,
+    UPDATE_VARIANCE_SUM_IN_QUADRATURE_WITH_OVERLAP
+};
+static int update_variance_method = UPDATE_VARIANCE_DAVID;
+static float systematic_error = 0.01;
 
 // Update the variance of a gaussian that has been combined with another
 // Does not Take into account the degree of overlap of observations
@@ -54,30 +61,56 @@ static double suminquadrature(double var1, double var2) {
     return max(1.0 / (1.0/var1 + 1.0/var2), 1e-6);
 }
 
-static bool sum_error_in_quadrature = false;
-static float systematic_error = 0.01;
-
 // Update the variance of a gaussian that has been combined with another
 // Taking into account the degree of overlap
 static double updateVarianceDavid(const tf2::Vector3 &newMean,
                                   const tf2::Vector3 &mean1, double var1,
                                   const tf2::Vector3 &mean2, double var2) {
-    if (sum_error_in_quadrature) {
-       return suminquadrature(var1, var2);
-    }
-
     //=((2*PI())^0.5)*C3*D3*EXP((((((C2-E2)^2))/(2*C3^2))+(((D2-E2)^2)/(2*(D3^2)))))
     double d1 = (mean1 - newMean).length2();
     double d2 = (mean2 - newMean).length2();
 
     double newVar = systematic_error + sqrt(2.0*M_PI) * var1 * var2 *
          exp(((d1 / (2.0*var1)) + d2 / (2.0*var2)));
-
     if (newVar > 100)
         newVar = 100;
     if (newVar < 10e-4)  //This line should be redundant if systematic_error does anything meaningful
         newVar = 10e-4;  //This line should be redundant if systematic_error does anything meaningful
     return newVar;
+}
+
+// Update the variance of a gaussian that has been combined with another
+// Taking into account the degree of overlap
+// In contrast to david method this method converges when d1 = d2 = 0 for any value
+static double suminquadratureOverlap(const tf2::Vector3 &newMean,
+                                  const tf2::Vector3 &mean1, double var1,
+                                  const tf2::Vector3 &mean2, double var2) {
+    //=((2*PI())^0.5)*C3*D3*EXP((((((C2-E2)^2))/(2*C3^2))+(((D2-E2)^2)/(2*(D3^2)))))
+    double d1 = (mean1 - newMean).length2();
+    double d2 = (mean2 - newMean).length2();
+
+    double newVar = systematic_error + suminquadrature(var1, var2) *
+         exp(((d1 / (2.0*var1)) + d2 / (2.0*var2)));
+    if (newVar > 100)
+        newVar = 100;
+    if (newVar < 10e-4)  //This line should be redundant if systematic_error does anything meaningful
+        newVar = 10e-4;  //This line should be redundant if systematic_error does anything meaningful
+    return newVar;
+}
+
+static double updateVariance(const tf2::Vector3 &newMean,
+                             const tf2::Vector3 &mean1, double var1,
+                             const tf2::Vector3 &mean2, double var2) {
+    switch (update_variance_method) {
+        case UPDATE_VARIANCE_DAVID:
+            return updateVarianceDavid(newMean, mean1, var1, mean2, var2);
+        case UPDATE_VARIANCE_SUM_IN_QUADRATURE:
+            return suminquadrature(var1, var2);
+        case UPDATE_VARIANCE_SUM_IN_QUADRATURE_WITH_OVERLAP:
+            return suminquadratureOverlap(newMean, mean1, var1, mean2, var2);
+    }
+    assert(false);
+    return 1000.0;
 }
 
 // Update transform t1 with t2 using variances as weights.
@@ -108,7 +141,7 @@ void TransformWithVariance::update(const TransformWithVariance& newT) {
     transform.setOrigin((var1 * o2 + var2 * o1) / (var1 + var2));
     transform.setRotation(q1.slerp(q2, var1 / (var1 + var2)).normalized());
 
-    variance = updateVarianceDavid(transform.getOrigin(), o1, var1, o2, var2);
+    variance = updateVariance(transform.getOrigin(), o1, var1, o2, var2);
 }
 
 // Weighted average of 2 transforms, variances computed using Alexey Method
@@ -198,9 +231,14 @@ Map::Map(ros::NodeHandle &nh) : tfBuffer(ros::Duration(30.0)){
     nh.param<float>("systematic_error", systematic_error, 0.01);
     nh.param<double>("future_date_transforms", future_date_transforms, 0.1);
     nh.param<bool>("publish_6dof_pose", publish_6dof_pose, false);
-    nh.param<bool>("sum_error_in_quadrature", sum_error_in_quadrature, false);
     nh.param<bool>("read_only_map", readOnly, false);
     nh.param<bool>("use_external_pose", useExternalPose, false);
+
+    bool sum_error_in_quadrature, sum_error_in_quadrature_with_overlap;
+    nh.param<bool>("sum_error_in_quadrature", sum_error_in_quadrature, false);
+    nh.param<bool>("sum_error_in_quadrature_with_overlap", sum_error_in_quadrature_with_overlap, false);
+    update_variance_method = sum_error_in_quadrature_with_overlap ? UPDATE_VARIANCE_SUM_IN_QUADRATURE_WITH_OVERLAP :
+                             sum_error_in_quadrature ? UPDATE_VARIANCE_SUM_IN_QUADRATURE : UPDATE_VARIANCE_DAVID;
 
     // threshold of object error for using multi-fidicial pose
     // set -ve to never use
