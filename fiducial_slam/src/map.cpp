@@ -201,7 +201,7 @@ Map::Map(ros::NodeHandle &nh) : tfBuffer(ros::Duration(30.0)){
     nh.param<bool>("publish_6dof_pose", publish_6dof_pose, false);
     nh.param<bool>("sum_error_in_quadrature", sum_error_in_quadrature, false);
     nh.param<bool>("read_only_map", readOnly, false);
-
+    nh.param<bool>("use_external_pose", useExternalPose, false);
 
     // threshold of object error for using multi-fidicial pose
     // set -ve to never use
@@ -224,9 +224,24 @@ Map::Map(ros::NodeHandle &nh) : tfBuffer(ros::Duration(30.0)){
         loadMap();
     }
 
+    if (useExternalPose) {
+      odometrySub = nh.subscribe<nav_msgs::Odometry>("/odom", 1,
+                                                        &Map::odometryCallback, this);
+    }
     publishMarkers();
 }
 
+void Map::odometryCallback(const nav_msgs::OdometryConstPtr& msg) {
+    // TODO (Michael) use message filters
+
+    geometry_msgs::PoseWithCovarianceStamped pose, poseOut;
+    pose.header = msg->header;
+    pose.pose = msg->pose;
+
+    tfBuffer.transform(pose, poseOut, mapFrame);
+
+    externalPose = fromPose(poseOut);
+}
 
 // Update map with a set of observations
 
@@ -237,23 +252,34 @@ void Map::update(vector<Observation>& obs, const ros::Time &time)
 
     frameNum++;
 
-    if (obs.size() > 0 && fiducials.size() == 0) {
-        isInitializingMap = true;
-    }
-
-    if (isInitializingMap) {
-        autoInit(obs, time);
-    }
-    else {
+    if (useExternalPose) {
         tf2::Stamped<TransformWithVariance> T_mapCam;
-        T_mapCam.frame_id_ = mapFrame;
+        updatePose(obs, time, T_mapCam);
 
-        if (updatePose(obs, time, T_mapCam) > 0 && obs.size() > 1 && !readOnly) {
-            updateMap(obs, time, T_mapCam);
+        // TODO(Michael) map initilize with external pose
+        if (obs.size() >= 1 && !readOnly && externalPose.stamp_ != ros::Time(0)) {
+            updateMap(obs, time, externalPose);
         }
     }
+    else {
+      if (obs.size() > 0 && fiducials.size() == 0) {
+          isInitializingMap = true;
+      }
 
-    publishMap();
+      if (isInitializingMap) {
+          autoInit(obs, time);
+      }
+      else {
+          tf2::Stamped<TransformWithVariance> T_mapCam;
+          T_mapCam.frame_id_ = mapFrame;
+
+          if (updatePose(obs, time, T_mapCam) > 0 && obs.size() > 1 && !readOnly) {
+              updateMap(obs, time, T_mapCam);
+          }
+      }
+
+      publishMap();
+    }
 }
 
 

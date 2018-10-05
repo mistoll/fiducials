@@ -49,6 +49,7 @@
 #include <list>
 #include <string>
 
+#include <nav_msgs/Odometry.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <tf2/convert.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -131,6 +132,23 @@ inline geometry_msgs::PoseWithCovarianceStamped toPose(const tf2::Stamped<Transf
     }
 
     return msg;
+}
+
+inline tf2::Stamped<TransformWithVariance> fromPose(const geometry_msgs::PoseWithCovarianceStamped& in)
+{
+    tf2::Stamped<TransformWithVariance> t;
+    t.stamp_ = in.header.stamp;
+    t.frame_id_ = in.header.frame_id;
+
+    fromMsg(in.pose.pose, t.transform);
+
+    // TODO(Michael) check variance
+    double variance = 0.0;
+    for (int i=0; i<=5; i++) {
+        variance = fmax(variance, in.pose.covariance[i*5+i]);
+    }
+    t.variance = variance;
+    return t;
 }
 
 inline geometry_msgs::TransformStamped toMsg(const tf2::Stamped<TransformWithVariance>& in)
@@ -217,6 +235,10 @@ class Map {
     ros::Time tfPublishTime;
     geometry_msgs::TransformStamped poseTf;
 
+    bool useExternalPose;
+    ros::Subscriber odometrySub;
+    tf2::Stamped<TransformWithVariance> externalPose;
+
     map<int, Fiducial> fiducials;
 
     Map(ros::NodeHandle &nh);
@@ -241,6 +263,8 @@ class Map {
 
     bool lookupTransform(const std::string &from, const std::string &to,
                          const ros::Time &time, tf2::Transform &T) const;
+
+    void odometryCallback(const nav_msgs::OdometryConstPtr& msg);
 };
 
 #endif
