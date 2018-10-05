@@ -194,7 +194,6 @@ Map::Map(ros::NodeHandle &nh) : tfBuffer(ros::Duration(30.0)){
     nh.param<std::string>("odom_frame", odomFrame, "odom");
     nh.param<std::string>("base_frame", baseFrame, "base_link");
 
-    nh.param<bool>("publish_tf", enablePublishTf, true);
     nh.param<float>("tf_publish_interval", tfPublishInterval, 1.0);
     nh.param<float>("systematic_error", systematic_error, 0.01);
     nh.param<double>("future_date_transforms", future_date_transforms, 0.1);
@@ -527,7 +526,10 @@ int Map::updatePose(vector<Observation>& obs, const ros::Time &time,
     poseTf = toMsg(outPose);
     poseTf.child_frame_id = outFrame;
     havePose = true;
-    publishTf();
+
+    if (tfPublishInterval != 0.0) {
+        publishTf();
+    }
 
     ROS_INFO("Finished frame\n");
     return numEsts;
@@ -537,12 +539,9 @@ int Map::updatePose(vector<Observation>& obs, const ros::Time &time,
 
 void Map::publishTf()
 {
-    if (enablePublishTf)
-    {
-        tfPublishTime = ros::Time::now();
-        poseTf.header.stamp = tfPublishTime + ros::Duration(future_date_transforms);
-        broadcaster.sendTransform(poseTf);
-    }
+    tfPublishTime = ros::Time::now();
+    poseTf.header.stamp = tfPublishTime + ros::Duration(future_date_transforms);
+    broadcaster.sendTransform(poseTf);
 }
 
 // publish latest tf if enough time has elapsed
