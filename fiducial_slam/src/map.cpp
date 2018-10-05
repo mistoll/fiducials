@@ -256,9 +256,18 @@ void Map::update(vector<Observation>& obs, const ros::Time &time)
         tf2::Stamped<TransformWithVariance> T_mapCam;
         updatePose(obs, time, T_mapCam);
 
-        // TODO(Michael) map initilize with external pose
-        if (obs.size() >= 1 && !readOnly && externalPose.stamp_ != ros::Time(0)) {
-            updateMap(obs, time, externalPose);
+        if (externalPose.stamp_ == ros::Time(0)) {
+            ROS_WARN_THROTTLE(5.0, "No external pose received yet.");
+        } else if (obs.size() >= 1 && !readOnly) {
+            tf2::Stamped<TransformWithVariance> T_mapBase = externalPose;
+            tf2::Transform T_baseCam;
+            if (lookupTransform(baseFrame, obs[0].T_camFid.frame_id_, time, T_baseCam)) {
+                  T_mapCam.setData(T_mapBase * T_baseCam);
+            }
+            else {
+                ROS_ERROR("Cannot determine tf from robot to camera\n");
+            }
+            updateMap(obs, time, T_mapCam);
         }
     }
     else {
